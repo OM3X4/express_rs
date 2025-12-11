@@ -1,9 +1,7 @@
-
 mod request {
     use std::collections::HashMap;
-    use std::net::{TcpStream};
     use std::io::Read;
-
+    use std::net::TcpStream;
 
     #[derive(Hash, Eq, PartialEq, Debug, Clone)]
     pub enum Method {
@@ -74,7 +72,8 @@ mod request {
             if let (Some(content_length), Some(content_type)) =
                 (hashmap.get("Content-Length"), hashmap.get("Content-Type"))
             {
-                let body_bytes = read_body(stream, content_length.parse().unwrap(), left_over_of_body);
+                let body_bytes =
+                    read_body(stream, content_length.parse().unwrap(), left_over_of_body);
                 body = match content_type.as_str() {
                     "application/json" => {
                         Some(Body::JSON(String::from_utf8_lossy(&body_bytes).to_string()))
@@ -89,14 +88,15 @@ mod request {
                         }
                         Some(Body::FormData(map))
                     }
-                    "text/plain" => Some(Body::Text(String::from_utf8_lossy(&body_bytes).to_string())),
+                    "text/plain" => {
+                        Some(Body::Text(String::from_utf8_lossy(&body_bytes).to_string()))
+                    }
                     x if !x.is_empty() => Some(Body::Binary(body_bytes)),
                     _ => None,
                 };
             } else {
                 body = None
             }
-
 
             return Request {
                 method,
@@ -105,8 +105,6 @@ mod request {
                 body,
             };
         }
-
-
     }
     fn read_body(stream: &mut TcpStream, content_length: usize, left_over: Vec<u8>) -> Vec<u8> {
         let mut buf = left_over;
@@ -145,103 +143,159 @@ mod request {
 
         panic!("Connection Stopped before finishing")
     }
-
 }
 
 pub mod response {
+    use std::{io::Write, net::TcpStream};
+
     pub struct Response {
-        status: i8,
+        status: i32,
         content_type: Option<String>,
-        content_length: Option<String>
+        content_length: Option<i32>,
+        body: String,
     }
 
     impl Response {
-
+        pub fn new() -> Response {
+            Response {
+                status: 200,
+                content_length: None,
+                content_type: None,
+                body: "".to_string(),
+            }
+        }
+        pub fn status(mut self, code: i32) -> Self {
+            self.status = code;
+            return self;
+        }
+        pub fn html(mut self, html: String) -> Self {
+            self.content_type = Some("text/html".to_string());
+            self.content_length = Some(html.len() as i32);
+            self.body = html;
+            return self;
+        }
+        pub fn json(mut self, json: String) -> Self {
+            self.content_type = Some("application/json".to_string());
+            self.content_length = Some(json.len() as i32);
+            self.body = json;
+            return self;
+        }
+        pub fn send(&mut self, stream: &mut TcpStream) {
+            let status_line = format!("HTTP/1.1 {}", self.status);
+            println!("");
+            if let (Some(content_len), Some(content_type)) =
+                (&self.content_length, &self.content_type)
+            {
+                let response = format!(
+                    "{status_line}\r\nContent-Length: {}\r\nContent-Type: {}\r\n\r\n{}",
+                    content_len, content_type, self.body
+                );
+                stream.write_all(response.as_bytes()).unwrap();
+            } else {
+                let response = format!("{status_line}\r\n\r\n");
+                stream.write_all(response.as_bytes()).unwrap();
+            }
+        }
     }
 }
 
 pub mod express {
 
-    use std::net::{TcpListener};
-    use std::collections::HashMap;
     use super::request::Method;
-    use crate::request;
     use super::response::Response;
+    use crate::request;
+    use std::collections::HashMap;
+    use std::net::TcpListener;
 
-    type RouteFunction = dyn Fn(&request::Request , Response) -> Response + 'static;
+    type RouteFunction = dyn Fn(&request::Request, Response) -> Response + 'static;
 
     pub struct Application {
-        methods: HashMap<(Method , String) , Box<RouteFunction>>
+        methods: HashMap<(Method, String), Box<RouteFunction>>,
     }
-
 
     pub trait Server {
         fn new() -> Application;
 
-        fn run(&mut self , port: i32);
+        fn run(&mut self, port: i32);
 
-        fn get<F>(&mut self , route: String , function: F)
-        where F: Fn(&request::Request, Response) -> Response + 'static ;
-        fn post<F>(&mut self , route: String , function: F)
-        where F: Fn(&request::Request, Response) -> Response + 'static ;
-        fn put<F>(&mut self , route: String , function: F)
-        where F: Fn(&request::Request, Response) -> Response + 'static ;
-        fn patch<F>(&mut self , route: String , function: F)
-        where F: Fn(&request::Request, Response) -> Response + 'static ;
-        fn delete<F>(&mut self , route: String , function: F)
-        where F: Fn(&request::Request, Response) -> Response + 'static ;
+        fn get<F>(&mut self, route: String, function: F)
+        where
+            F: Fn(&request::Request, Response) -> Response + 'static;
+        fn post<F>(&mut self, route: String, function: F)
+        where
+            F: Fn(&request::Request, Response) -> Response + 'static;
+        fn put<F>(&mut self, route: String, function: F)
+        where
+            F: Fn(&request::Request, Response) -> Response + 'static;
+        fn patch<F>(&mut self, route: String, function: F)
+        where
+            F: Fn(&request::Request, Response) -> Response + 'static;
+        fn delete<F>(&mut self, route: String, function: F)
+        where
+            F: Fn(&request::Request, Response) -> Response + 'static;
     }
 
     impl Server for Application {
         fn new() -> Application {
             return Application {
-                methods: HashMap::new()
+                methods: HashMap::new(),
             };
         }
 
-        fn run(&mut self , port: i32) {
-            let listener: TcpListener = TcpListener::bind(format!("127.0.0.1:{}" , port)).unwrap();
+        fn run(&mut self, port: i32) {
+            let listener: TcpListener = TcpListener::bind(format!("127.0.0.1:{}", port)).unwrap();
 
-            println!("Started server on port {}" , port);
+            println!("Started server on port {}", port);
 
             for stream in listener.incoming() {
                 let mut stream = stream.unwrap();
                 let request = super::request::Request::new(&mut stream);
-                if let Some(method) = self.methods.get(&(request.method.clone() , request.route.clone())) {
+                if let Some(method) = self
+                    .methods
+                    .get(&(request.method.clone(), request.route.clone()))
+                {
                     let f = method.as_ref();
-                    f(&request , Response);
+                    f(&request, Response::new()).send(&mut stream);
                 };
 
                 // println!("{request:#?}");
             }
         }
 
-        fn get<F>(&mut self , route: String , function: F)
-        where F: Fn(&request::Request, Response) -> Response + 'static
+        fn get<F>(&mut self, route: String, function: F)
+        where
+            F: Fn(&request::Request, Response) -> Response + 'static,
         {
-            self.methods.insert((Method::GET , route) ,Box::new(function));
+            self.methods
+                .insert((Method::GET, route), Box::new(function));
         }
-        fn post<F>(&mut self , route: String , function: F)
-        where F: Fn(&request::Request, Response) -> Response + 'static
+        fn post<F>(&mut self, route: String, function: F)
+        where
+            F: Fn(&request::Request, Response) -> Response + 'static,
         {
-            self.methods.insert((Method::POST , route) ,Box::new(function));
+            self.methods
+                .insert((Method::POST, route), Box::new(function));
         }
-        fn put<F>(&mut self , route: String , function: F)
-        where F: Fn(&request::Request, Response) -> Response + 'static
+        fn put<F>(&mut self, route: String, function: F)
+        where
+            F: Fn(&request::Request, Response) -> Response + 'static,
         {
-            self.methods.insert((Method::PUT , route) ,Box::new(function));
+            self.methods
+                .insert((Method::PUT, route), Box::new(function));
         }
-        fn patch<F>(&mut self , route: String , function: F)
-        where F: Fn(&request::Request, Response) -> Response + 'static
+        fn patch<F>(&mut self, route: String, function: F)
+        where
+            F: Fn(&request::Request, Response) -> Response + 'static,
         {
-            self.methods.insert((Method::PATCH , route) ,Box::new(function));
+            self.methods
+                .insert((Method::PATCH, route), Box::new(function));
         }
-        fn delete<F>(&mut self , route: String , function: F)
-        where F: Fn(&request::Request, Response) -> Response + 'static
+        fn delete<F>(&mut self, route: String, function: F)
+        where
+            F: Fn(&request::Request, Response) -> Response + 'static,
         {
-            self.methods.insert((Method::DELETE , route) ,Box::new(function));
+            self.methods
+                .insert((Method::DELETE, route), Box::new(function));
         }
-
     }
-
 }

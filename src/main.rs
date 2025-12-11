@@ -161,11 +161,26 @@ fn main() {
         println!("The Request is \n{:#?}" , req);
 
 
-        return express_rs::response::Response;
+        return _res.status(201).json(String::from(r#"{"name":"omar"}"#));
     });
-    server.put(String::from("/omar") , |req , _res| {
+    server.get(String::from("/omar") , |req , _res| {
         println!("The Request is \n{:#?}" , req);
-        return _res;
+
+        let html = r##"
+        <!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Hello!</title>
+  </head>
+  <body>
+    <h1>Omar Emad!</h1>
+    <p>This is Omar.</p>
+  </body>
+</html>
+        "##;
+
+        return _res.status(200).html(html.to_string());
     });
 
     server.run(7878)
