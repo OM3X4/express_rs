@@ -152,7 +152,6 @@ fn main() {
 
 
     use express_rs::express;
-    use express::Server;
 
     let mut server =  express::Application::new();
 
@@ -183,7 +182,7 @@ fn main() {
         return _res.status(200).html(html.to_string());
     });
 
-    server.run(7878)
+    server.listen(7878)
 
 }
 

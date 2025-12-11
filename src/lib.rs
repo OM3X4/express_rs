@@ -13,7 +13,7 @@ mod request {
     }
 
     #[derive(Debug)]
-    enum Body {
+    pub enum Body {
         JSON(String),
         FormData(HashMap<String, String>),
         Text(String),
@@ -213,36 +213,53 @@ pub mod express {
         methods: HashMap<(Method, String), Box<RouteFunction>>,
     }
 
-    pub trait Server {
-        fn new() -> Application;
 
-        fn run(&mut self, port: i32);
-
-        fn get<F>(&mut self, route: String, function: F)
+    impl Application {
+        pub fn get<F>(&mut self, route: String, function: F)
         where
-            F: Fn(&request::Request, Response) -> Response + 'static;
-        fn post<F>(&mut self, route: String, function: F)
+            F: Fn(&request::Request, Response) -> Response + 'static,
+        {
+            self.methods
+                .insert((Method::GET, route), Box::new(function));
+        }
+        pub fn post<F>(&mut self, route: String, function: F)
         where
-            F: Fn(&request::Request, Response) -> Response + 'static;
-        fn put<F>(&mut self, route: String, function: F)
+            F: Fn(&request::Request, Response) -> Response + 'static,
+        {
+            self.methods
+                .insert((Method::POST, route), Box::new(function));
+        }
+        pub fn put<F>(&mut self, route: String, function: F)
         where
-            F: Fn(&request::Request, Response) -> Response + 'static;
-        fn patch<F>(&mut self, route: String, function: F)
+            F: Fn(&request::Request, Response) -> Response + 'static,
+        {
+            self.methods
+                .insert((Method::PUT, route), Box::new(function));
+        }
+        pub fn patch<F>(&mut self, route: String, function: F)
         where
-            F: Fn(&request::Request, Response) -> Response + 'static;
-        fn delete<F>(&mut self, route: String, function: F)
+            F: Fn(&request::Request, Response) -> Response + 'static,
+        {
+            self.methods
+                .insert((Method::PATCH, route), Box::new(function));
+        }
+        pub fn delete<F>(&mut self, route: String, function: F)
         where
-            F: Fn(&request::Request, Response) -> Response + 'static;
+            F: Fn(&request::Request, Response) -> Response + 'static,
+        {
+            self.methods
+                .insert((Method::DELETE, route), Box::new(function));
+        }
     }
 
-    impl Server for Application {
-        fn new() -> Application {
+    impl Application {
+        pub fn new() -> Application {
             return Application {
                 methods: HashMap::new(),
             };
         }
 
-        fn run(&mut self, port: i32) {
+        pub fn listen(&mut self, port: i32) {
             let listener: TcpListener = TcpListener::bind(format!("127.0.0.1:{}", port)).unwrap();
 
             println!("Started server on port {}", port);
@@ -260,42 +277,6 @@ pub mod express {
 
                 // println!("{request:#?}");
             }
-        }
-
-        fn get<F>(&mut self, route: String, function: F)
-        where
-            F: Fn(&request::Request, Response) -> Response + 'static,
-        {
-            self.methods
-                .insert((Method::GET, route), Box::new(function));
-        }
-        fn post<F>(&mut self, route: String, function: F)
-        where
-            F: Fn(&request::Request, Response) -> Response + 'static,
-        {
-            self.methods
-                .insert((Method::POST, route), Box::new(function));
-        }
-        fn put<F>(&mut self, route: String, function: F)
-        where
-            F: Fn(&request::Request, Response) -> Response + 'static,
-        {
-            self.methods
-                .insert((Method::PUT, route), Box::new(function));
-        }
-        fn patch<F>(&mut self, route: String, function: F)
-        where
-            F: Fn(&request::Request, Response) -> Response + 'static,
-        {
-            self.methods
-                .insert((Method::PATCH, route), Box::new(function));
-        }
-        fn delete<F>(&mut self, route: String, function: F)
-        where
-            F: Fn(&request::Request, Response) -> Response + 'static,
-        {
-            self.methods
-                .insert((Method::DELETE, route), Box::new(function));
         }
     }
 }
