@@ -26,6 +26,7 @@ mod request {
         pub route: String,
         pub properties: HashMap<String, String>,
         pub body: Option<Body>,
+        pub params: Option<HashMap<String, String>>,
     }
 
     impl Request {
@@ -103,6 +104,7 @@ mod request {
                 route,
                 properties: hashmap,
                 body,
+                params: None,
             };
         }
     }
@@ -203,59 +205,64 @@ pub mod express {
 
     use super::request::Method;
     use super::response::Response;
-    use crate::request;
+    use crate::request::{self, Request};
     use std::collections::HashMap;
-    use std::net::TcpListener;
+    use std::net::{TcpListener, TcpStream};
+
+    #[derive(Debug)]
+    pub enum RouteSegment {
+        Static(String),
+        Dynamic(String),
+    }
 
     type RouteFunction = dyn Fn(&request::Request, Response) -> Response + 'static;
 
     pub struct Application {
-        methods: HashMap<(Method, String), Box<RouteFunction>>,
+        pub static_methods: HashMap<(Method, String), Box<RouteFunction>>,
+        pub dynamic_methods: Vec<(Method, Vec<RouteSegment>, Box<RouteFunction>)>,
     }
-
 
     impl Application {
         pub fn get<F>(&mut self, route: String, function: F)
         where
             F: Fn(&request::Request, Response) -> Response + 'static,
         {
-            self.methods
-                .insert((Method::GET, route), Box::new(function));
+            // self.methods
+            // .insert((Method::GET, route), Box::new(function));
+
+            self.handle_adding_new_route(route, Method::GET, Box::new(function));
         }
         pub fn post<F>(&mut self, route: String, function: F)
         where
             F: Fn(&request::Request, Response) -> Response + 'static,
         {
-            self.methods
-                .insert((Method::POST, route), Box::new(function));
+            self.handle_adding_new_route(route, Method::POST, Box::new(function));
         }
         pub fn put<F>(&mut self, route: String, function: F)
         where
             F: Fn(&request::Request, Response) -> Response + 'static,
         {
-            self.methods
-                .insert((Method::PUT, route), Box::new(function));
+            self.handle_adding_new_route(route, Method::PUT, Box::new(function));
         }
         pub fn patch<F>(&mut self, route: String, function: F)
         where
             F: Fn(&request::Request, Response) -> Response + 'static,
         {
-            self.methods
-                .insert((Method::PATCH, route), Box::new(function));
+            self.handle_adding_new_route(route, Method::PATCH, Box::new(function));
         }
         pub fn delete<F>(&mut self, route: String, function: F)
         where
             F: Fn(&request::Request, Response) -> Response + 'static,
         {
-            self.methods
-                .insert((Method::DELETE, route), Box::new(function));
+            self.handle_adding_new_route(route, Method::DELETE, Box::new(function));
         }
     }
 
     impl Application {
         pub fn new() -> Application {
             return Application {
-                methods: HashMap::new(),
+                static_methods: HashMap::new(),
+                dynamic_methods: Vec::new(),
             };
         }
 
@@ -266,17 +273,123 @@ pub mod express {
 
             for stream in listener.incoming() {
                 let mut stream = stream.unwrap();
-                let request = super::request::Request::new(&mut stream);
-                if let Some(method) = self
-                    .methods
-                    .get(&(request.method.clone(), request.route.clone()))
-                {
-                    let f = method.as_ref();
-                    f(&request, Response::new()).send(&mut stream);
-                };
+                let mut request = super::request::Request::new(&mut stream);
+
+                self.execute_route(
+                    request.route.to_string(),
+                    request.method.clone(),
+                    &mut request,
+                    Response::new(),
+                    &mut stream,
+                );
+                // if let Some(method) = self
+                //     .methods
+                //     .get(&(request.method.clone(), request.route.clone()))
+                // {
+                //     let f = method.as_ref();
+                //     f(&request, Response::new()).send(&mut stream);
+                // };
 
                 // println!("{request:#?}");
             }
         }
+
+        fn execute_route(
+            &self,
+            route: String,
+            method: Method,
+            request: &mut Request,
+            response: Response,
+            stream: &mut TcpStream,
+        ) {
+            if route.starts_with("/") {
+                if let Some(method) = self
+                    .static_methods
+                    .get(&(request.method.clone(), request.route.clone()))
+                {
+                    let f = method.as_ref();
+                    f(&request, Response::new()).send(stream);
+                } else {
+                    let mut array: Vec<_> = route.split("/").collect();
+                    array = array[1..].to_vec();
+                    for (method_search, route, function) in self.dynamic_methods.iter() {
+                        if array.len() != route.len() || method != *method_search {
+                            continue;
+                        }
+                        let mut params_map = HashMap::new();
+                        for (index, pattern) in array.iter().enumerate() {
+                            match &route[index] {
+                                RouteSegment::Static(s) => {
+                                    if s != *pattern {
+                                        continue;
+                                    };
+                                }
+                                RouteSegment::Dynamic(s) => {
+                                    params_map.insert(s.to_string(), pattern.to_string());
+                                }
+                            }
+                        }
+                        request.params = Some(params_map);
+                        function(&request, response).send(stream);
+                        return;
+                    }
+                }
+
+                }
+            }
+
+
+        fn handle_adding_new_route(
+            &mut self,
+            path: String,
+            method: Method,
+            function: Box<RouteFunction>,
+        ) {
+            if path.contains(':') {
+                let mut vec = Vec::new();
+                let parts: Vec<_> = path.split('/').collect::<Vec<_>>()[1..].to_vec();
+                parts.iter().for_each(|item| {
+                    if item.starts_with(':') {
+                        vec.push(RouteSegment::Dynamic(item[1..].to_string()))
+                    } else {
+                        vec.push(RouteSegment::Static(item.to_string()));
+                    }
+                });
+                self.dynamic_methods.push((method, vec, function));
+            } else {
+                self.static_methods.insert((method, path), function);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod test {
+
+    use crate::response::Response;
+
+    use super::*;
+
+    #[test]
+    fn dynamic_routes() {
+        let mut app = express::Application::new();
+        app.get("/omar/:id".to_string(), |req, _| {
+            println!("{}", req.params.as_ref().unwrap().get("id").unwrap());
+
+            Response::new()
+        });
+        app.get(String::from("/hello"), |req, _res| {
+            println!("The Request is \n{:#?}", req);
+
+            return _res.status(201).json(String::from(r#"{"name":"omar"}"#));
+        });
+        println!(
+            "{:#?}",
+            app.dynamic_methods
+                .iter()
+                .map(|item| &item.1)
+                .collect::<Vec<_>>()
+        );
+        println!("{:#?}", app.static_methods.keys().collect::<Vec<_>>());
     }
 }
